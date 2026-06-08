@@ -1,0 +1,21 @@
+{
+  "name": "be",
+  "version": "1.0.0",
+  "description": "backend for devConnect app",
+  "main": "index.js",
+  "scripts": {
+    "start":"node src/app.js",
+    "dev":"nodemon src/app.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "nodejs",
+    "nd",
+    "js"
+  ],
+  "author": "Sanjeet",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^5.2.1"
+  }
+}
