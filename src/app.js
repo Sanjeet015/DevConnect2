@@ -1,7 +1,7 @@
 const express = require("express");
 
 const app = express();
-
+console.log("Hello");
 const PORT = 3000;
 
 app.use("/test",(req,res)=>{
