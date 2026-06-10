@@ -1,4 +1,6 @@
 const express = require("express");
+const {validateSignup} = require('./utils/validation');
+const bcrypt = require('bcrypt');
 try {
   require('dotenv').config();
 } catch (err) {
@@ -8,21 +10,52 @@ const connectDB = require("./config/database");
 const User = require("./models/user");
 
 const app = express();
-const PORT = process.env.PORT || 8000;
+const PORT = process.env.PORT;
 
 app.use(express.json());
 
 app.post("/signup", async (req, res) => {
 
   // console.log(req.body);
-  const userObj = req.body;
-  
-  const user = new User(userObj);
   try {
+    validateSignup(req);
+    const {firstName,lastName,emailId,password} = req.body;
+    
+    const passwordHash = await bcrypt.hash(password,10);
+    const user = new User({
+      firstName,
+      lastName,
+      emailId,
+      password:passwordHash,
+    })
     await user.save();
     res.send("User added successfully..!");
   } catch (err) {
-    res.status(400).send("Error "+err.message);
+    res.status(400).send("Error: "+err.message);
+  }
+})
+
+app.post("/login", async (req,res)=>{
+  try {
+    const {emailId,password} = req.body;
+    if (!emailId || !password) {
+      res.status(400).send("Email and password are required");
+    }
+    const user = await User.findOne({emailId:emailId});
+
+    if(!user){
+      throw new Error("Email address is not valid");
+    }
+
+    const isPasswordValid = await bcrypt.compare(password,user.password);
+
+    if(isPasswordValid){
+      res.send("Login successfull");
+    }else{
+      res.status(400).send("Please enter correct password");
+    }
+  } catch (err) {
+    res.status(400).send("Error: "+err.message);
   }
 })
 
@@ -31,7 +64,7 @@ app.get("/user",async (req,res)=>{
 
   try {
     const user = await User.findOne({emailId:userEmail});
-    if(user.length === 0){
+    if(!user === 0){
       res.status(404).send("User not found");
     }else{
       res.send(user);
