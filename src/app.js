@@ -1,18 +1,24 @@
-const express = require("express");
-const {validateSignup} = require('./utils/validation');
-const bcrypt = require('bcrypt');
 try {
   require('dotenv').config();
 } catch (err) {
   console.warn('dotenv not found; falling back to environment variables. Install with: npm install dotenv');
 }
+
+const express = require("express");
+const {validateSignup} = require('./utils/validation');
+const cookieParser = require('cookie-parser')
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcrypt');
+const {userAuth}= require("./middleware/auth")
 const connectDB = require("./config/database");
 const User = require("./models/user");
 
 const app = express();
 const PORT = process.env.PORT;
+const SECRET_KEY = process.env.SECRET_KEY;
 
 app.use(express.json());
+app.use(cookieParser());
 
 app.post("/signup", async (req, res) => {
 
@@ -47,15 +53,30 @@ app.post("/login", async (req,res)=>{
       throw new Error("Email address is not valid");
     }
 
-    const isPasswordValid = await bcrypt.compare(password,user.password);
+    const isPasswordValid = await user.validatePassword(password);
 
     if(isPasswordValid){
+
+      const token = await user.getJWT();
+      res.cookie("token",token,{
+        expires:new Date(Date.now()+8*360000),
+      });
       res.send("Login successfull");
     }else{
       res.status(400).send("Please enter correct password");
     }
   } catch (err) {
     res.status(400).send("Error: "+err.message);
+  }
+})
+
+
+app.get("/profile",userAuth,async (req,res)=>{
+  try {
+    const user = req.user;
+    res.send(user);
+  } catch (err) {
+    res.status(500).send("Error: "+err.message);
   }
 })
 
