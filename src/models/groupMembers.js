@@ -26,6 +26,6 @@ GroupMembersSchema.index(
   { unique: true }
 );
 
-const GroupMembersModel = new mongoose.model("GroupMembers",GroupMembersSchema);
+const GroupMembersModel = mongoose.model("GroupMembers",GroupMembersSchema);
 
 module.exports = GroupMembersModel;

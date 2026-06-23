@@ -19,8 +19,12 @@ authRouter.post("/signup", async (req, res) => {
       emailId,
       password:passwordHash,
     })
-    await user.save();
-    res.send("User added successfully..!");
+    const savedUser = await user.save();
+    const token = await savedUser.getJWT();
+    res.cookie("token",token,{
+      expires:new Date(Date.now()+8*360000),
+    });
+    res.json({message:"Signup successfull",data:savedUser});
   } catch (err) {
     res.status(400).send("Error: "+err.message);
   }
@@ -46,7 +50,7 @@ authRouter.post("/login", async (req,res)=>{
       res.cookie("token",token,{
         expires:new Date(Date.now()+8*360000),
       });
-      res.send("Login successfull");
+      res.json({message:"Login successfull",data:user});
     }else{
       res.status(400).send("Please enter correct password");
     }

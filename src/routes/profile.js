@@ -26,12 +26,17 @@ profileRouter.patch("/profile/update",userAuth,async (req,res)=>{
 
     const loggedInUser = req.user;
 
+    const {age} = req.body;
+    if(age>100 || age<14){
+      throw new Error("Age should be in the range of 14 to 100");
+    }
+
     Object.keys(req.body).forEach(key=>loggedInUser[key]=req.body[key]);
 
     await loggedInUser.save();
-    res.send(`${loggedInUser.firstName}, Your profile updated successfully`);
+    res.json({message:"Your profile updated successfully",data:loggedInUser});
   } catch (err) {
-    res.status(400).send("ERROR: "+err.message);
+    res.status(400).json({message:"ERROR: "+err.message});
   }
 })
 

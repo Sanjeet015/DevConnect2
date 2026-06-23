@@ -1,30 +1,3 @@
-// POST   /group/create
-
-// GET    /group/my
-
-// GET    /group/:groupId
-
-// PATCH  /group/:groupId
-
-// POST   /group/:groupId/add-member
-
-// DELETE /group/:groupId/member/:userId
-
-// POST   /group/:groupId/leave
-
-// PATCH  /group/:groupId/make-admin/:userId
-
-// PATCH  /group/:groupId/remove-admin/:userId
-
-// PATCH  /group/:groupId/transfer-ownership/:userId
-
-// GET    /group/:groupId/members
-
-// GET    /group/:groupId/admins
-
-// DELETE /group/:groupId
-
-
 const express = require("express");
 const Group = require('../models/group');
 const GroupMembers = require('../models/groupMembers');
@@ -62,21 +35,31 @@ groupRouter.post("/groups",userAuth,async(req,res)=>{
   }
 })
 
-groupRouter.get("/groups/my",userAuth,async(req,res)=>{
+groupRouter.get("/groups/my", userAuth, async (req, res) => {
   try {
     const userId = req.user._id;
-    const membership = await GroupMembers.find({userId})
+    const membership = await GroupMembers.find({ userId })
       .select("groupId")
-      .populate("groupId", "name description");
-    
-    const groups = membership.map((m)=>m.groupId);
-
-    res.json({message:"Groups fetched successfully",data:groups});
+      .populate({
+        path: "groupId",
+        select: "name description createdBy",
+        populate: {
+          path: "createdBy",
+          select: "firstName lastName photoUrl"
+        }
+      });
+    const groups = membership
+      .map((m) => m.groupId)
+      .filter(Boolean); 
+    res.json({ 
+      message: "Groups fetched successfully", 
+      data: groups 
+    });
   
   } catch (err) {
-    res.status(400).json({message:"ERROR: "+err.message});
+    res.status(400).json({ message: "ERROR: " + err.message });
   }
-})
+});
 
 groupRouter.get("/group/:groupId",userAuth,async(req,res)=>{
   try {
@@ -302,77 +285,61 @@ groupRouter.post("/group/:groupId/leave",userAuth,async(req,res)=>{
   }
 })
 
-groupRouter.patch("/group/:groupId/make-admin/:userId",userAuth,async(req,res)=>{
+groupRouter.patch("/group/:groupId/make-admin/:userId", userAuth, async (req, res) => {
   try {
     const requesterId = req.user._id;
     const groupId = req.params.groupId;
     const userId = req.params.userId;
 
-    if(!mongoose.Types.ObjectId.isValid(groupId)){
-      return res.status(400).json({message:"Invalid group id"});
+    // 1. Validate ObjectIDs first
+    if (!mongoose.Types.ObjectId.isValid(groupId)) {
+      return res.status(400).json({ message: "Invalid group id" });
     }
-    if(!mongoose.Types.ObjectId.isValid(userId)){
-      return res.status(400).json({message:"Invalid user id"});
-    }
-
-    const group = await Group.findById(groupId);
-    if(!group){
-      return res.status(404).json({message:"Group not found"});
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ message: "Invalid user id" });
     }
 
-
+    // 2. Fetch the requester's permissions first to save database performance overhead
     const requesterMembership = await GroupMembers.findOne({
       groupId,
       userId: requesterId,
     });
 
-      if(targetMembership.role === "owner"){
-        return res.status(400).json({
-          message: "Owner cannot be promoted"
-        });
-      }
+    if (!requesterMembership || requesterMembership.role !== "owner") {
+      return res.status(403).json({ message: "Unauthorized access: Only the group owner can assign admins" });
+    }
 
-      if (
-        !requesterMembership ||
-        requesterMembership.role !== "owner"
-      ) {
-        return res.status(400).json({
-          message: "Unauthorized access",
-        });
-      }
+    // 3. Fetch the target user's membership safely *before* checking roles
+    const targetMembership = await GroupMembers.findOne({
+      groupId,
+      userId,
+    });
 
+    if (!targetMembership) {
+      return res.status(404).json({ message: "User is not a member of the group" });
+    }
 
+    // 4. Run conditional checks against target roles cleanly
+    if (targetMembership.role === "owner") {
+      return res.status(400).json({ message: "Owner cannot be modified or promoted" });
+    }
 
-      const targetMembership = await GroupMembers.findOne({
-        groupId,
-        userId,
-      });
+    if (targetMembership.role === "admin") {
+      return res.status(400).json({ message: "User is already an admin" });
+    }
 
-      if (!targetMembership) {
-        return res.status(400).json({
-          message: "User is not a member of the group",
-        });
-      }
+    // 5. Commit updates securely
+    targetMembership.role = "admin";
+    await targetMembership.save();
 
-      if (targetMembership.role === "admin") {
-        return res.status(400).json({
-          message: "User is already an admin",
-        });
-      }
-
-      targetMembership.role = "admin";
-
-      await targetMembership.save();
-
-      res.json({
-        message: "User promoted to admin successfully",
-      });
+    res.json({
+      message: "User promoted to admin successfully",
+    });
 
   } catch (err) {
-    res.status(400).json({message:"ERROR: "+err.message});
+    res.status(500).json({ message: "Server Error: " + err.message });
   }
-
-})
+});
 
 groupRouter.patch("/group/:groupId/remove-admin/:userId",userAuth,async(req,res)=>{
   try {
@@ -655,11 +622,5 @@ groupRouter.delete("/group/:groupId", userAuth, async (req, res) => {
     });
   }
 });
-
-// try {
-    
-//   } catch (err) {
-//     res.status(400).json({message:"ERROR: "+err.message});
-//   }
 
 module.exports = groupRouter

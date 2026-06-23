@@ -78,7 +78,7 @@ userRouter.get("/user/feed",userAuth,async(req,res)=>{
         {_id: {$nin: Array.from(hideUserFromFeed)}},
         {_id: {$ne: loggedInUser._id}}
       ]
-    }).select("firstName lastName age gender skills photoUrl")
+    }).select("firstName lastName age gender about skills photoUrl")
       .skip(skip)
       .limit(limit);
 
