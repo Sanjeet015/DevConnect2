@@ -1,4 +1,5 @@
 const express = require("express");
+const mongoose = require("mongoose");
 const { userAuth } = require("../middleware/auth");
 const requestRouter = express.Router();
 const User = require('../models/user');
@@ -9,6 +10,11 @@ requestRouter.post("/request/send/:status/:toUserId",userAuth,async(req,res)=>{
     const fromUserId = req.user._id;
     const status = req.params.status;
     const toUserId = req.params.toUserId;
+
+    // Validate ObjectId before hitting the DB to avoid CastError
+    if (!mongoose.Types.ObjectId.isValid(toUserId)) {
+      return res.status(400).json({ message: "Invalid user ID" });
+    }
 
     const allowedStatus = ["Interested","Ignored"];
     if(!allowedStatus.includes(status)){
@@ -32,23 +38,21 @@ requestRouter.post("/request/send/:status/:toUserId",userAuth,async(req,res)=>{
       return res.status(400).json({message:"Connection request already exists"});
     }
 
-    const connectionRequest = new ConnectionRequest({
-      fromUserId,
-      toUserId,
-      status
-    });
-
+    // Save the request as-is — Interested stays pending until User B accepts from Requests page
+    const connectionRequest = new ConnectionRequest({ fromUserId, toUserId, status });
     const data = await connectionRequest.save();
 
-    let message = "";
-    if(status=="Interested") message = `${req.user.firstName} is interested in ${toUser.firstName}`;
-    else message = `${req.user.firstName} is ignored ${toUser.firstName}`;
+    const message = status === "Interested"
+      ? `${req.user.firstName} sent a connection request to ${toUser.firstName}`
+      : `${req.user.firstName} ignored ${toUser.firstName}`;
 
-    res.json({message:message,data});
+    res.json({ message, data });
+
   } catch (err) {
     res.status(400).send("ERROR: "+err.message);
   }
 })
+
 
 
 requestRouter.post("/request/review/:status/:requestId",userAuth,async (req,res)=>{

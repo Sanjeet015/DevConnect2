@@ -1,5 +1,4 @@
 const mongoose = require('mongoose');
-const { trim } = require('validator');
 
 const projectSchema = new mongoose.Schema({
   ownerId:{
@@ -39,6 +38,8 @@ const projectSchema = new mongoose.Schema({
 },{
   timestamps:true,
 })
+
+projectSchema.index({ ownerId: 1 });
 
 const projectModel = mongoose.model("Project",projectSchema);
 

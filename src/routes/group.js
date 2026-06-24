@@ -88,7 +88,7 @@ groupRouter.get("/group/:groupId",userAuth,async(req,res)=>{
     res.json({message:"Group fetched successfully",data:group});
 
   } catch (err) {
-    res.status.json({message:"ERROR: "+err.message});
+    res.status(400).json({message:"ERROR: "+err.message});
   }
 })
 

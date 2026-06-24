@@ -27,9 +27,18 @@ profileRouter.patch("/profile/update",userAuth,async (req,res)=>{
     const loggedInUser = req.user;
 
     const {age} = req.body;
-    if(age>100 || age<14){
+    // Guard: only validate age when it was explicitly provided in the request
+    if(age !== undefined && (age > 100 || age < 14)){
       throw new Error("Age should be in the range of 14 to 100");
     }
+
+    // Trim string fields before saving to prevent whitespace-padded names
+    const trimFields = ["firstName", "lastName", "about", "gender", "photoUrl"];
+    trimFields.forEach(key => {
+      if (req.body[key] && typeof req.body[key] === "string") {
+        req.body[key] = req.body[key].trim();
+      }
+    });
 
     Object.keys(req.body).forEach(key=>loggedInUser[key]=req.body[key]);
 
@@ -39,6 +48,23 @@ profileRouter.patch("/profile/update",userAuth,async (req,res)=>{
     res.status(400).json({message:"ERROR: "+err.message});
   }
 })
+
+const { upload, uploadToCloudinary } = require("../utils/cloudinary");
+
+profileRouter.post("/profile/upload", userAuth, upload.single("photo"), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: "No file uploaded" });
+    }
+    const secureUrl = await uploadToCloudinary(req.file.buffer);
+    res.json({
+      message: "Image uploaded successfully",
+      photoUrl: secureUrl
+    });
+  } catch (err) {
+    res.status(400).json({ message: "Upload failed: " + err.message });
+  }
+});
 
 profileRouter.patch("/profile/password",userAuth,async(req,res)=>{
   try {
@@ -61,6 +87,8 @@ profileRouter.patch("/profile/password",userAuth,async(req,res)=>{
     const hashedPassword = await bcrypt.hash(newPassword,10);
 
     loggedInUser.password = hashedPassword;
+    // Invalidate all active sessions by clearing the stored refresh token
+    loggedInUser.refreshToken = undefined;
 
     await loggedInUser.save();
 

@@ -3,6 +3,8 @@ const validator = require("validator");
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
 const SECRET_KEY = process.env.SECRET_KEY;
+// Separate secret for refresh tokens — add REFRESH_TOKEN_SECRET to your .env for production
+const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET || process.env.SECRET_KEY;
 
 const userSchema = new mongoose.Schema({
   firstName:{
@@ -29,12 +31,6 @@ const userSchema = new mongoose.Schema({
   password:{
     type:String,
     required:true,
-    minLength:8,
-    validate(value){
-      if(!validator.isStrongPassword(value)){
-        throw new Error("Your password is not strong "+value);
-      }
-    }
   },
   age:{
     type:Number,
@@ -63,19 +59,30 @@ const userSchema = new mongoose.Schema({
   },
   skills:{
     type:[String],
+  },
+  refreshToken:{
+    type:String
   }
 },{
   timestamps:true,
 });
 
 
-// Schema level methods
-userSchema.methods.getJWT = async function(){
+userSchema.methods.getAccessToken = async function(){
   const user = this;
-  const token = await jwt.sign({_id:user._id},SECRET_KEY,{
+  return await jwt.sign({_id:user._id},SECRET_KEY,{
+    expiresIn:"15m"
+  });
+}
+
+userSchema.methods.getRefreshToken = async function(){
+  const user = this;
+  const rToken = await jwt.sign({_id:user._id}, REFRESH_TOKEN_SECRET,{
     expiresIn:"7d"
   });
-  return token;
+  user.refreshToken = rToken;
+  await user.save();
+  return rToken;
 }
 
 userSchema.methods.validatePassword = async function(password){

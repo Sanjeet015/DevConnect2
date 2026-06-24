@@ -15,6 +15,7 @@ const MessageSchema = new mongoose.Schema({
     type:String,
     required:true,
     trim:true,
+    maxLength: 2000, // Prevent oversized message payloads
   },
   seenBy: [
     {

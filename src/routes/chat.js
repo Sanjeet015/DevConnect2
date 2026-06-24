@@ -74,46 +74,63 @@ chatRouter.get("/chat/conversations", userAuth, async (req, res) => {
       )
       .sort({ updatedAt: -1 });
 
-    const data = await Promise.all(
-      chats.map(async (chat) => {
-        const otherUser = chat.participants.find(
-          (p) => p._id.toString() !== requesterId.toString()
-        );
-
-        if (!otherUser) return null;
-
-        const unreadCount = await Message.countDocuments({
-          chatId: chat._id,
+    const chatIds = chats.map(c => c._id);
+    
+    // Fetch unread message counts for all active chats in a single aggregate query
+    const unreadAgg = await Message.aggregate([
+      {
+        $match: {
+          chatId: { $in: chatIds },
           senderId: { $ne: requesterId },
-          seenBy: { $ne: requesterId },
-        });
+          seenBy: { $ne: requesterId }
+        }
+      },
+      {
+        $group: {
+          _id: "$chatId",
+          count: { $sum: 1 }
+        }
+      }
+    ]);
 
-        return {
-          chatId: chat._id,
-          user: {
-            _id: otherUser._id,
-            firstName: otherUser.firstName,
-            lastName: otherUser.lastName,
-            photoUrl: otherUser.photoUrl,
-            age: otherUser.age,
-            gender: otherUser.gender,
-            about: otherUser.about,
-            skills: otherUser.skills,
-          },
-          lastMessage: chat.lastMessage || null,
-          unreadCount,
-          updatedAt: chat.updatedAt,
-        };
-      })
-    );
+    // Create a hashmap of chat ID -> unread count for O(1) lookups
+    const unreadMap = new Map();
+    unreadAgg.forEach(item => {
+      unreadMap.set(item._id.toString(), item.count);
+    });
 
-    const filteredData = data.filter(Boolean);
+    const data = chats.map((chat) => {
+      const otherUser = chat.participants.find(
+        (p) => p._id.toString() !== requesterId.toString()
+      );
 
-    const totalUnreadChats = filteredData.filter(
+      if (!otherUser) return null;
+
+      const unreadCount = unreadMap.get(chat._id.toString()) || 0;
+
+      return {
+        chatId: chat._id,
+        user: {
+          _id: otherUser._id,
+          firstName: otherUser.firstName,
+          lastName: otherUser.lastName,
+          photoUrl: otherUser.photoUrl,
+          age: otherUser.age,
+          gender: otherUser.gender,
+          about: otherUser.about,
+          skills: otherUser.skills,
+        },
+        lastMessage: chat.lastMessage || null,
+        unreadCount,
+        updatedAt: chat.updatedAt,
+      };
+    }).filter(Boolean);
+
+    const totalUnreadChats = data.filter(
       (chat) => chat.unreadCount > 0
     ).length;
 
-    const totalUnreadMessages = filteredData.reduce(
+    const totalUnreadMessages = data.reduce(
       (sum, chat) => sum + chat.unreadCount,
       0
     );
@@ -122,7 +139,7 @@ chatRouter.get("/chat/conversations", userAuth, async (req, res) => {
       message: "Chats fetched successfully",
       totalUnreadChats,
       totalUnreadMessages,
-      data: filteredData,
+      data,
     });
   } catch (err) {
     res.status(400).json({
@@ -249,6 +266,10 @@ chatRouter.post("/chat/message", userAuth, async (req, res) => {
       return res.status(400).json({ message: "Message cannot be empty" });
     }
 
+    if (text.trim().length > 2000) {
+      return res.status(400).json({ message: "Message cannot exceed 2000 characters" });
+    }
+
     const chat = await Chat.findOne({
       _id: chatId,
       participants: userId
@@ -285,6 +306,17 @@ chatRouter.post("/chat/message", userAuth, async (req, res) => {
         photoUrl: message.senderId.photoUrl
       }
     };
+
+    // Broadcast real-time message event via Socket.IO
+    try {
+      const { broadcastToRoom } = require("../utils/socket");
+      broadcastToRoom(chatId.toString(), "receive_message", {
+        ...response,
+        isMine: false
+      });
+    } catch (socketErr) {
+      console.error("Socket broadcast failed:", socketErr.message);
+    }
 
     res.json({
       message: "Message sent successfully",

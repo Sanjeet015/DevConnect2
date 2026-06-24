@@ -25,6 +25,7 @@ GroupMembersSchema.index(
   { groupId: 1, userId: 1 },
   { unique: true }
 );
+GroupMembersSchema.index({ userId: 1 });
 
 const GroupMembersModel = mongoose.model("GroupMembers",GroupMembersSchema);
 
