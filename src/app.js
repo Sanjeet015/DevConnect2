@@ -1,15 +1,18 @@
 try {
-  require('dotenv').config();
+  require("dotenv").config();
 } catch (err) {
-  console.warn('dotenv not found; falling back to environment variables. Install with: npm install dotenv');
+  console.warn(
+    "dotenv not found; falling back to environment variables. Install with: npm install dotenv"
+  );
 }
 
 const express = require("express");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
-const cors = require('cors');
-const cookieParser = require('cookie-parser');
+const cors = require("cors");
+const cookieParser = require("cookie-parser");
 const http = require("http");
+const mongoose = require("mongoose");
 
 const connectDB = require("./config/database");
 const { initializeSocket } = require("./utils/socket");
@@ -17,55 +20,63 @@ const { initializeSocket } = require("./utils/socket");
 const app = express();
 const PORT = process.env.PORT || 8000;
 
-// Trust reverse proxy (Nginx, PM2, Cloudflare, etc.) to get correct IP for rate limiting
+// Trust proxy (for Nginx / AWS / PM2)
 app.set("trust proxy", 1);
 
 // Security headers
 app.use(helmet());
 
-// CORS configuration
+// =========================
+// CORS CONFIG (FIXED)
+// =========================
+
 const allowedOrigins = [
   "http://localhost:5173",
-  "http://13.211.128.168"
+  "http://127.0.0.1:5173",
+  "http://13.211.128.168",
+  "http://13.211.128.168:5173",
 ];
-if (process.env.FRONTEND_URL) {
-  allowedOrigins.push(process.env.FRONTEND_URL);
-}
 
-const isOriginAllowed = (origin) => {
-  if (!origin) return true;
-  const isLocal = origin.startsWith("http://localhost:") || 
-                  origin.startsWith("http://127.0.0.1:") || 
-                  origin === "http://localhost" || 
-                  origin === "http://127.0.0.1";
-  if (isLocal) return true;
-  
-  const cleanOrigin = origin.replace(/\/$/, "");
-  return allowedOrigins.some(o => o.replace(/\/$/, "") === cleanOrigin);
-};
+const normalize = (origin) => origin?.replace(/\/$/, "");
 
-app.use(cors({
-  origin: (origin, callback) => {
-    if (isOriginAllowed(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error(`Not allowed by CORS: ${origin}`));
-    }
-  },
-  credentials: true,
-}));
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Allow server-to-server / curl / postman
+      if (!origin) return callback(null, true);
 
+      const requestOrigin = normalize(origin);
+
+      const isAllowed = allowedOrigins.some(
+        (o) => normalize(o) === requestOrigin
+      );
+
+      if (isAllowed) {
+        return callback(null, true);
+      }
+
+      console.log("❌ CORS blocked origin:", origin);
+      return callback(null, false); // safe reject
+    },
+    credentials: true,
+  })
+);
+
+// =========================
+// BODY PARSERS
+// =========================
 app.use(express.json());
 app.use(cookieParser());
 
-// NoSQL injection protection — recursively strip MongoDB operator keys from req.body.
-// Replaces express-mongo-sanitize which is incompatible with this router's read-only req.query.
+// =========================
+// NO-SQL INJECTION PROTECTION
+// =========================
 const sanitizeMongoOperators = (obj) => {
   if (Array.isArray(obj)) {
     obj.forEach(sanitizeMongoOperators);
-  } else if (obj !== null && typeof obj === 'object') {
-    Object.keys(obj).forEach(key => {
-      if (key.startsWith('$') || key.includes('.')) {
+  } else if (obj && typeof obj === "object") {
+    Object.keys(obj).forEach((key) => {
+      if (key.startsWith("$") || key.includes(".")) {
         delete obj[key];
       } else {
         sanitizeMongoOperators(obj[key]);
@@ -73,43 +84,49 @@ const sanitizeMongoOperators = (obj) => {
     });
   }
 };
+
 app.use((req, _res, next) => {
-  if (req.body && typeof req.body === 'object') {
+  if (req.body && typeof req.body === "object") {
     sanitizeMongoOperators(req.body);
   }
   next();
 });
 
-// Rate limiters
+// =========================
+// RATE LIMITING
+// =========================
 const generalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 mins
-  max: process.env.NODE_ENV === "production" ? 200 : 10000, // Limit each IP to 200 requests per window in prod, high in dev
+  windowMs: 15 * 60 * 1000,
+  max: process.env.NODE_ENV === "production" ? 200 : 10000,
   message: { message: "Too many requests, please try again later." },
   standardHeaders: true,
   legacyHeaders: false,
 });
 
 const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 mins
-  max: process.env.NODE_ENV === "production" ? 30 : 1000, // Limit to 30 requests per window in prod, high in dev
-  message: { message: "Too many auth requests, please try again after 15 minutes." },
+  windowMs: 15 * 60 * 1000,
+  max: process.env.NODE_ENV === "production" ? 30 : 1000,
+  message: {
+    message: "Too many auth requests, please try again after 15 minutes.",
+  },
   standardHeaders: true,
   legacyHeaders: false,
 });
 
-// Apply rate limiting
 app.use("/login", authLimiter);
 app.use("/signup", authLimiter);
 app.use(generalLimiter);
 
-// Routers
+// =========================
+// ROUTES
+// =========================
 const authRouter = require("./routes/auth");
 const profileRouter = require("./routes/profile");
 const requestRouter = require("./routes/request");
 const userRouter = require("./routes/user");
-const projectRouter = require('./routes/project');
-const groupRouter = require('./routes/group');
-const chatRouter = require('./routes/chat');
+const projectRouter = require("./routes/project");
+const groupRouter = require("./routes/group");
+const chatRouter = require("./routes/chat");
 
 app.use("/", authRouter);
 app.use("/", profileRouter);
@@ -119,37 +136,46 @@ app.use("/", projectRouter);
 app.use("/", groupRouter);
 app.use("/", chatRouter);
 
-// HTTP and Socket.IO Server wrapper
+// =========================
+// SERVER + SOCKET
+// =========================
 const server = http.createServer(app);
 initializeSocket(server);
 
-const mongoose = require("mongoose");
 mongoose.set("bufferCommands", false);
 
-// Start server immediately so it's responsive to client requests
 server.listen(PORT, () => {
   console.log(`Server is successfully listening on port ${PORT}`);
 });
 
-// Attempt database connection asynchronously
+// =========================
+// DATABASE CONNECTION
+// =========================
 connectDB()
   .then(() => {
-    console.log(`Database connected successfully to ${process.env.MONGO_URI}`);
+    console.log("Database connected successfully");
   })
   .catch(async (err) => {
-    console.error(`Primary database connection failed to ${process.env.MONGO_URI}:`, err.message);
-    
-    // Only attempt local fallback if the primary wasn't already local
-    if (process.env.MONGO_URI !== "mongodb://127.0.0.1:27017/devConnect") {
-      console.log("Attempting local database fallback (mongodb://127.0.0.1:27017/devConnect)...");
+    console.error("Primary DB connection failed:", err.message);
+
+    if (
+      process.env.MONGO_URI !== "mongodb://127.0.0.1:27017/devConnect"
+    ) {
+      console.log("Trying local MongoDB fallback...");
+
       try {
-        await mongoose.connect("mongodb://127.0.0.1:27017/devConnect");
-        console.log("Connected to local database fallback successfully!");
+        await mongoose.connect(
+          "mongodb://127.0.0.1:27017/devConnect"
+        );
+        console.log("Connected to local MongoDB fallback!");
       } catch (localErr) {
-        console.error("Local database fallback connection also failed:", localErr.message);
-        console.warn("WARNING: Server is running but database is offline.");
+        console.error(
+          "Local MongoDB fallback also failed:",
+          localErr.message
+        );
+        console.warn("Server running without database.");
       }
     } else {
-      console.warn("WARNING: Server is running but database is offline.");
+      console.warn("Server running without database.");
     }
   });
